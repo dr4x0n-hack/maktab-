@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang='uz'>
+<head>
+  <meta charset='utf-8' />
+  <meta name='viewport' content='width=device-width,initial-scale=1' />
+  <title>Maktab - Foydalanuvchilar boshqaruvi</title>
+  <style>
+    :root{--bg:#0f1720;--card:#111827;--accent:#60a5fa;--muted:#9ca3af;--glass: rgba(255,255,255,0.03)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial; background:linear-gradient(180deg,#071025 0%, #071a2a 100%);color:#e6eef6}
+    .wrap{max-width:980px;margin:36px auto;padding:20px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+    h1{font-size:20px;margin:0;color:#fff}
+    p.lead{margin:4px 0 0;color:var(--muted);font-size:13px}
+
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:16px;border-radius:10px;box-shadow:0 6px 20px rgba(2,6,23,0.6);}
+
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:var(--accent);border:none;color:#05203a;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-weight:500}
+
+    .users{margin-top:18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+    .user{background:var(--glass);padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.02)}
+    .user h3{margin:0 0 6px;font-size:15px}
+    .user p{margin:0;font-size:13px;color:var(--muted)}
+
+    .modal-backdrop{position:fixed;inset:0;background:rgba(2,6,23,0.6);display:none;align-items:center;justify-content:center}
+    .modal{width:100%;max-width:480px;background:var(--card);padding:18px;border-radius:12px}
+    .modal h2{margin:0 0 12px}
+    .form-row{display:flex;flex-direction:column;margin-bottom:10px}
+    label{font-size:13px;color:var(--muted);margin-bottom:6px}
+    input,select{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+
+    .note{font-size:12px;color:var(--muted);margin-top:8px}
+
+    footer{margin-top:20px;text-align:center;color:var(--muted);font-size:13px}
+
+    @media (max-width:600px){.controls{flex-direction:column;align-items:stretch}header{flex-direction:column;align-items:flex-start;gap:6px}}
+  </style>
+</head>
+<body>
+  <div class='wrap'>
+    <header>
+      <div>
+        <h1>Maktab — Foydalanuvchilar</h1>
+        <p class='lead'>Bu sahifada foydalanuvchilar ro'yxatini ko'rasiz. "Foydalanuvchi qo'shish" tugmasi barchaga ko'rinadi, lekin formani ochish uchun parol talab qilinadi.</p>
+      </div>
+      <div class='controls'>
+        <button id='addBtn'>Foydalanuvchi qo'shish</button>
+        <button class='ghost' id='exportBtn'>Eksport (JSON)</button>
+        <button class='ghost' id='importBtn'>Import</button>
+      </div>
+    </header>
+
+    <section class='card'>
+      <h2>Ro'yxat</h2>
+      <div id='users' class='users' aria-live='polite'></div>
+      <p class='note'>Eslatma: bu shunchaki frontend misol — server tomonida saqlash bo'lmasa, ma'lumot brauzer localStorage'da saqlanadi va boshqa qurilmadan ko'rinmaydi.</p>
+    </section>
+
+    <footer>© Maktab. Kodni sozlash mumkin — parolni o'zgartiring yoki server bilan ulang.</footer>
+  </div>
+
+  <div id='modal' class='modal-backdrop' role='dialog' aria-modal='true'>
+    <div class='modal' id='modalBox'>
+      <h2 id='modalTitle'>Parol bilan himoyalangan</h2>
+
+      <div id='passwordArea'>
+        <p class='note'>Foydalanuvchi qo'shish uchun parolni kiriting.</p>
+        <div class='form-row'>
+          <label for='secret'>Parol</label>
+          <input id='secret' type='password' autocomplete='current-password' />
+        </div>
+        <div class='actions'>
+          <button id='unlockBtn'>Kirish</button>
+          <button class='ghost' id='cancelPwd'>Bekor qilish</button>
+        </div>
+      </div>
+
+      <div id='formArea' style='display:none'>
+        <p class='note'>Yangi foydalanuvchini qo'shing.</p>
+        <div class='form-row'>
+          <label for='name'>Ism familiya</label>
+          <input id='name' type='text' />
+        </div>
+        <div class='form-row'>
+          <label for='classInput'>Sinf / Lavozim</label>
+          <input id='classInput' type='text' />
+        </div>
+        <div class='form-row'>
+          <label for='email'>Email (ixtiyoriy)</label>
+          <input id='email' type='email' />
+        </div>
+        <div class='actions'>
+          <button id='saveUser'>Saqlash</button>
+          <button class='ghost' id='closeForm'>Yopish</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <input type='file' id='fileInput' accept='application/json' style='display:none' />
+
+  <script>
+    // Wrap in DOMContentLoaded to ensure all elements exist before querying
+    document.addEventListener('DOMContentLoaded', ()=>{
+      // ======= Sozlanadigan parametrlar =======
+      const DEFAULT_PASSWORD_PLAINTEXT = 'admin123'; // demo only
+
+      // Helper: SHA-256 using Web Crypto when available, otherwise fallback to simple hash (NOT secure, demo only)
+      async function sha256Hex(message) {
+        if (window.crypto && crypto.subtle && crypto.subtle.digest) {
+          const enc = new TextEncoder();
+          const data = enc.encode(message);
+          const hash = await crypto.subtle.digest('SHA-256', data);
+          const bytes = Array.from(new Uint8Array(hash));
+          return bytes.map(b => b.toString(16).padStart(2,'0')).join('');
+        } else {
+          console.warn('Web Crypto not available — using fallback hash (insecure)');
+          // simple fallback: djb2-like
+          let h = 5381;
+          for (let i=0;i<message.length;i++) h = ((h<<5) + h) + message.charCodeAt(i);
+          return (h >>> 0).toString(16).padStart(8,'0');
+        }
+      }
+
+      // ======= App state =======
+      const LS_KEY = 'maktab_users_v1';
+      const LS_PW_KEY = 'maktab_pw_hash_v1';
+
+      const usersEl = document.getElementById('users');
+      const addBtn = document.getElementById('addBtn');
+      const modal = document.getElementById('modal');
+      const passwordArea = document.getElementById('passwordArea');
+      const formArea = document.getElementById('formArea');
+
+      const secret = document.getElementById('secret');
+      const unlockBtn = document.getElementById('unlockBtn');
+      const cancelPwd = document.getElementById('cancelPwd');
+      const saveUser = document.getElementById('saveUser');
+      const closeForm = document.getElementById('closeForm');
+
+      const nameInput = document.getElementById('name');
+      const classInput = document.getElementById('classInput');
+      const emailInput = document.getElementById('email');
+
+      const exportBtn = document.getElementById('exportBtn');
+      const importBtn = document.getElementById('importBtn');
+      const fileInput = document.getElementById('fileInput');
+
+      // Safety: check all required elements
+      const required = [{id:'addBtn',el:addBtn},{id:'exportBtn',el:exportBtn},{id:'importBtn',el:importBtn},{id:'users',el:usersEl}];
+      for (const r of required) if (!r.el) console.error('Element missing:', r.id);
+
+      async function initPassword() {
+        try {
+          let stored = localStorage.getItem(LS_PW_KEY);
+          if (!stored) {
+            const h = await sha256Hex(DEFAULT_PASSWORD_PLAINTEXT);
+            localStorage.setItem(LS_PW_KEY, h);
+            console.log('Default password hash stored (demo)');
+          }
+        } catch (e) { console.error('initPassword failed', e); }
+      }
+
+      function loadUsers() {
+        try {
+          const raw = localStorage.getItem(LS_KEY);
+          if (!raw) return [];
+          return JSON.parse(raw);
+        } catch (e) { console.error(e); return []; }
+      }
+
+      function saveUsers(arr) { localStorage.setItem(LS_KEY, JSON.stringify(arr)); }
+
+      function renderUsers() {
+        const list = loadUsers();
+        usersEl.innerHTML = '';
+        if (list.length === 0) {
+          usersEl.innerHTML = "<div style='color:var(--muted)'>Hozircha foydalanuvchilar yo'q.</div>";
+          return;
+        }
+        for (const u of list) {
+          const el = document.createElement('div'); el.className = 'user';
+          el.innerHTML = `<h3>${escapeHtml(u.name)}</h3><p>${escapeHtml(u.class||'')} ${u.email?'<br>'+escapeHtml(u.email):''}</p>`;
+          usersEl.appendChild(el);
+        }
+      }
+
+      function escapeHtml(s){ if(!s) return ''; return s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }
+
+      function showModal(){ modal.style.display='flex'; passwordArea.style.display='block'; formArea.style.display='none'; secret.value=''; nameInput.value=''; classInput.value=''; emailInput.value=''; document.getElementById('modalBox').scrollTop=0; }
+      function hideModal(){ modal.style.display='none'; }
+
+      addBtn.addEventListener('click', ()=>{ console.log('Add button clicked'); showModal(); });
+      cancelPwd.addEventListener('click', ()=>{ hideModal(); });
+
+      unlockBtn.addEventListener('click', async ()=>{
+        try{
+          const attempt = secret.value||'';
+          if (!attempt) { alert('Parolni kiriting'); return; }
+          const attemptHash = await sha256Hex(attempt);
+          const storedHash = localStorage.getItem(LS_PW_KEY);
+          if (attemptHash === storedHash) {
+            passwordArea.style.display='none';
+            formArea.style.display='block';
+            document.getElementById('modalTitle').textContent = "Foydalanuvchi qo'shish";
+          } else {
+            alert('Noto'g'ri parol');
+          }
+        }catch(e){ console.error(e); alert('Parol tekshirishda xato'); }
+      });
+
+      saveUser.addEventListener('click', ()=>{
+        try{
+          const name = nameInput.value.trim();
+          if (!name) { alert('Ism kiriting'); return; }
+          const obj = { name, class: classInput.value.trim(), email: emailInput.value.trim() };
+          const arr = loadUsers(); arr.push(obj); saveUsers(arr); renderUsers(); hideModal();
+        }catch(e){ console.error(e); alert('Foydalanuvchi saqlashda xato'); }
+      });
+
+      closeForm.addEventListener('click', ()=>{ hideModal(); });
+
+      exportBtn.addEventListener('click', ()=>{
+        try{
+          const arr = loadUsers();
+          const blob = new Blob([JSON.stringify(arr, null, 2)], {type:'application/json'});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = 'maktab_users.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        }catch(e){ console.error(e); alert('Eksportda xato'); }
+      });
+
+      importBtn.addEventListener('click', ()=>{ fileInput.click(); });
+      fileInput.addEventListener('change', ()=>{
+        const f = fileInput.files[0]; if(!f) return;
+        const r = new FileReader();
+        r.onload = (e)=>{
+          try{
+            const data = JSON.parse(e.target.result);
+            if(!Array.isArray(data)) throw new Error("Fayl noto'g'ri formatda");
+            saveUsers(data); renderUsers(); alert('Import muvaffaqiyatli');
+          }catch(err){ console.error(err); alert('Import xatosi: '+err.message); }
+        };
+        r.readAsText(f);
+      });
+
+      // Utility to change password from console: setPassword('yangiParol')
+      window.setPassword = async function(plain){ const h = await sha256Hex(plain); localStorage.setItem(LS_PW_KEY, h); alert(`Parol o'zgartirildi`); };
+
+      // init
+      (async ()=>{ await initPassword(); renderUsers(); })();
+
+      // Close modal when clicking backdrop
+      modal.addEventListener('click', (e)=>{ if (e.target === modal) hideModal(); });
+
+      console.log('Maktab script initialized');
+    });
+  </script>
+</body>
+</html>
